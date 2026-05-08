@@ -2,7 +2,9 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getDatabase, ref, onValue, off } from 'firebase/database';
 
+// 1. ADDED USERNAME TO THE INTERFACE
 interface UserStats {
+  username: string;
   balance: number;
   points: number;
   xp: number;
@@ -18,7 +20,9 @@ interface UserContextType {
   incrementWebCaptcha: () => Promise<void>;
 }
 
+// 2. ADDED DEFAULT USERNAME
 const defaultStats: UserStats = {
+  username: "User",
   balance: 0,
   points: 0,
   xp: 0,
@@ -42,12 +46,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         setUid(user.uid);
         dbRef = ref(db, `users/${user.uid}`);
         
-        // We KEEP the real-time listener so the UI instantly animates 
-        // when the backend processes the changes.
         onValue(dbRef, (snapshot) => {
           const data = snapshot.val();
           if (data) {
             setStats({
+              // 3. SMART FETCH: Checks for 'username' first, then 'name', then falls back to "User"
+              username: data.username || data.name || "User",
               balance: typeof data.balance === 'number' ? data.balance : 0,
               points: typeof data.points === 'number' ? data.points : 0,
               xp: typeof data.xp === 'number' ? data.xp : 0,
@@ -68,23 +72,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // --- Secure Backend API Helpers ---
-  
-  // Generic helper to securely route requests through your gateway
   const callBackendGateway = async (action: string, payload: any = {}) => {
     const auth = getAuth();
     const user = auth.currentUser;
     if (!user) return;
 
     try {
-      // 1. Get the fresh ID token for authentication
       const idToken = await user.getIdToken(true);
-      
-      // 2. Point to your Supabase security-server
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const gatewayUrl = `${supabaseUrl}/functions/v1/security-server`;
 
-      // 3. Send the secure request
       const response = await fetch(gatewayUrl, {
         method: 'POST',
         headers: {
@@ -92,7 +89,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           'Authorization': `Bearer ${idToken}`
         },
         body: JSON.stringify({
-          target_service: 'main-handler', // Routing to your main backend logic
+          target_service: 'main-handler',
           action: action,
           user_id: user.uid,
           ...payload
