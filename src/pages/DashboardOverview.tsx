@@ -25,13 +25,15 @@ export function DashboardOverview() {
         <div className="flex flex-col">
           <h1 className="text-3xl md:text-4xl lg:text-5xl font-extrabold tracking-tight text-white flex flex-col leading-[1.1]">
             <span className="text-xl md:text-2xl lg:text-3xl font-bold opacity-70 tracking-normal">{greeting},</span>
-            <span className="text-4xl md:text-5xl lg:text-6xl">{userData.username}</span>
+            {/* Added fallback "User" so it never shows up blank */}
+            <span className="text-4xl md:text-5xl lg:text-6xl">{userData?.username || "User"}</span>
           </h1>
           <p className="text-sm md:text-base text-slate-500 italic mt-2 font-medium">Welcome Back to your workspace</p>
         </div>
+        {/* Added 'hidden md:flex' to remove this icon on mobile devices */}
         <Link 
           to="/dashboard/notifications" 
-          className="flex w-12 h-12 rounded-2xl bg-white/5 border border-white/10 items-center justify-center text-slate-400 hover:text-white hover:border-blue-500/50 hover:bg-blue-500/10 transition-all group relative shrink-0 shadow-lg"
+          className="hidden md:flex w-12 h-12 rounded-2xl bg-white/5 border border-white/10 items-center justify-center text-slate-400 hover:text-white hover:border-blue-500/50 hover:bg-blue-500/10 transition-all group relative shrink-0 shadow-lg"
         >
           <Bell className="w-5 h-5 group-hover:rotate-12 transition-transform" />
           <div className="absolute top-3.5 right-3.5 w-2.5 h-2.5 rounded-full bg-blue-500 border-2 border-[#020617] group-hover:scale-125 transition-transform shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
@@ -58,7 +60,7 @@ export function DashboardOverview() {
                   Balance
                 </div>
                 <div className="text-4xl md:text-5xl font-extrabold text-white tracking-tight drop-shadow-md">
-                  ${userData.balance.toFixed(4)}
+                  ${userData?.balance?.toFixed(4) || "0.0000"}
                 </div>
               </div>
             </div>
@@ -83,13 +85,13 @@ export function DashboardOverview() {
               <div className="flex flex-col">
                 <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">Points</span>
                 <div className="text-2xl md:text-3xl font-extrabold text-white drop-shadow-md tracking-tight flex items-center gap-2">
-                  {userData.points}
+                  {userData?.points || 0}
                 </div>
               </div>
               <div className="flex flex-col pl-4">
                 <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">XP</span>
                 <div className="text-2xl md:text-3xl font-extrabold text-white drop-shadow-md tracking-tight flex items-center gap-2">
-                  {userData.xp}
+                  {userData?.xp || 0}
                 </div>
               </div>
             </div>
@@ -115,13 +117,13 @@ export function DashboardOverview() {
               <div className="flex flex-col">
                 <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">Score</span>
                 <div className="text-2xl md:text-3xl font-extrabold text-white drop-shadow-md tracking-tight flex items-center gap-2">
-                  {userData.score} <span className="text-sm text-slate-500 font-medium">/ 100</span>
+                  {userData?.score || 0} <span className="text-sm text-slate-500 font-medium">/ 100</span>
                 </div>
               </div>
               <div className="flex flex-col pl-4">
                 <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1 whitespace-nowrap">Captchas Solved</span>
                 <div className="text-2xl md:text-3xl font-extrabold text-white drop-shadow-md tracking-tight flex items-center gap-2">
-                  {userData.web_captcha}
+                  {userData?.web_captcha || 0}
                 </div>
               </div>
             </div>
