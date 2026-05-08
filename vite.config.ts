@@ -6,8 +6,8 @@ import {defineConfig, loadEnv} from 'vite';
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
-    // 👇 ADD THIS LINE for GitHub Pages (Replace 'ProCaptcha' if your repo name is different!)
-    base: '/ProCaptcha/', 
+    // 👇 THE BULLETPROOF FIX: Use a relative path! 👇
+    base: './', 
 
     plugins: [react(), tailwindcss()],
     define: {
