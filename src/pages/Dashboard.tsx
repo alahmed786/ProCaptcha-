@@ -10,7 +10,7 @@ import {
   LogIn,
   User
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion"; // Changed from "motion/react" to "framer-motion" (standard Vite/React import)
+import { motion, AnimatePresence } from "framer-motion";
 
 const SIDEBAR_LINKS = [
   { name: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
