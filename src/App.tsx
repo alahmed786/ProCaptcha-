@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+// 👇 Swapped BrowserRouter for HashRouter 👇
+import { HashRouter, Routes, Route } from "react-router-dom";
 import { Layout } from "./components/layout/Layout";
 import { Home } from "./pages/Home";
 import { Pricing } from "./pages/Pricing";
@@ -31,8 +32,8 @@ export default function App() {
     <LogProvider>
       <AuthProvider>
         <UserProvider>
-        {/* 👇 THIS IS THE FIX: Added basename 👇 */}
-        <BrowserRouter basename={import.meta.env.BASE_URL}>
+        {/* 👇 Using HashRouter with NO basename needed! 👇 */}
+        <HashRouter>
           <Routes>
             <Route path="/" element={<Layout />}>
               <Route index element={<Home />} />
@@ -57,7 +58,7 @@ export default function App() {
               </Route>
             </Route>
           </Routes>
-        </BrowserRouter>
+        </HashRouter>
       </UserProvider>
     </AuthProvider>
     </LogProvider>
