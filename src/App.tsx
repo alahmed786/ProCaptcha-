@@ -31,7 +31,8 @@ export default function App() {
     <LogProvider>
       <AuthProvider>
         <UserProvider>
-        <BrowserRouter>
+        {/* 👇 THIS IS THE FIX: Added basename 👇 */}
+        <BrowserRouter basename={import.meta.env.BASE_URL}>
           <Routes>
             <Route path="/" element={<Layout />}>
               <Route index element={<Home />} />
