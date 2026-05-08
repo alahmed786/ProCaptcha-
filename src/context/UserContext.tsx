@@ -2,7 +2,6 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getDatabase, ref, onValue, off } from 'firebase/database';
 
-// 1. ADDED USERNAME TO THE INTERFACE
 interface UserStats {
   username: string;
   balance: number;
@@ -12,6 +11,17 @@ interface UserStats {
   web_captcha: number;
 }
 
+const defaultStats: UserStats = {
+  username: "User",
+  balance: 0,
+  points: 0,
+  xp: 0,
+  score: 100, // Starts at 100
+  web_captcha: 0
+};
+
+const UserContext = createContext<UserContextType | undefined>(undefined);
+
 interface UserContextType {
   stats: UserStats;
   addXP: (amount: number) => Promise<void>;
@@ -19,18 +29,6 @@ interface UserContextType {
   updateScore: (amount: number) => Promise<void>;
   incrementWebCaptcha: () => Promise<void>;
 }
-
-// 2. ADDED DEFAULT USERNAME
-const defaultStats: UserStats = {
-  username: "User",
-  balance: 0,
-  points: 0,
-  xp: 0,
-  score: 100,
-  web_captcha: 0
-};
-
-const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [stats, setStats] = useState<UserStats>(defaultStats);
@@ -50,12 +48,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           const data = snapshot.val();
           if (data) {
             setStats({
-              // 3. SMART FETCH: Checks for 'username' first, then 'name', then falls back to "User"
               username: data.username || data.name || "User",
               balance: typeof data.balance === 'number' ? data.balance : 0,
               points: typeof data.points === 'number' ? data.points : 0,
               xp: typeof data.xp === 'number' ? data.xp : 0,
-              score: typeof data.score === 'number' ? data.score : 0,
+              // 👇 FIX: If score doesn't exist, default it to 100!
+              score: typeof data.score === 'number' ? data.score : 100, 
               web_captcha: typeof data.web_captcha === 'number' ? data.web_captcha : 0,
             });
           }
