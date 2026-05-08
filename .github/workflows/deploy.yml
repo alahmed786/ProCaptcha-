@@ -41,7 +41,7 @@ jobs:
       - name: Build
         run: npm run build
         
-      # 👇 This fixes the React Router "404 Not Found" issue on refresh
+      # 👇 This fixes the React Router "404 Not Found" issue on ok refresh
       - name: Copy index.html to 404.html
         run: cp dist/index.html dist/404.html
 
