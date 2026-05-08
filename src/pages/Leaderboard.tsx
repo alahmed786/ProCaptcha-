@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import React, { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { 
   Trophy, Medal, Star, TrendingUp, Crown, 
   ArrowUpRight, ArrowDownRight, Minus, Sparkles, 
@@ -7,22 +7,19 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Card } from "../components/ui/Card";
-import { Button } from "../components/ui/Button";
-import { Input } from "../components/ui/Input";
 import { cn } from "../lib/utils";
 import { useUser } from "../context/UserContext";
+import { getAuth } from "firebase/auth";
+import { getDatabase, ref, query, orderByChild, limitToLast, onValue, off } from "firebase/database";
 
-const MOCK_LEADERS = [
-  { id: 1, name: "NeonPhantom", score: 12450, earned: 450.25, trend: "up", avatar: "NP", rank: 1, level: 85, badge: "Legendary", isCurrentUser: false },
-  { id: 2, name: "CryptoQueen", score: 11200, earned: 385.50, trend: "up", avatar: "CQ", rank: 2, level: 72, badge: "Elite", isCurrentUser: false },
-  { id: 3, name: "AlphaNode", score: 10850, earned: 320.10, trend: "down", avatar: "AN", rank: 3, level: 68, badge: "Master", isCurrentUser: false },
-  { id: 4, name: "BitMaster", score: 9200, earned: 215.80, trend: "up", avatar: "BM", rank: 4, level: 54, badge: "Expert", isCurrentUser: false },
-  { id: 5, name: "CyberWolf", score: 8750, earned: 198.40, trend: "stable", avatar: "CW", rank: 5, level: 51, badge: "Expert", isCurrentUser: false },
-  { id: 6, name: "PixelPirate", score: 7900, earned: 172.15, trend: "up", avatar: "PP", rank: 6, level: 48, badge: "Pro", isCurrentUser: false },
-  { id: 7, name: "DataStream", score: 7450, earned: 145.60, trend: "down", avatar: "DS", rank: 7, level: 42, badge: "Pro", isCurrentUser: false },
-  { id: 8, name: "LogicGate", score: 6800, earned: 128.90, trend: "up", avatar: "LG", rank: 8, level: 39, badge: "Active", isCurrentUser: false },
-  { id: 9, name: "ShadowScript", score: 6100, earned: 112.30, trend: "stable", avatar: "SS", rank: 9, level: 35, badge: "Active", isCurrentUser: false },
-];
+const getBadgeByXP = (xp: number) => {
+  if (xp >= 10000) return "Legendary";
+  if (xp >= 5000) return "Elite";
+  if (xp >= 2000) return "Master";
+  if (xp >= 1000) return "Expert";
+  if (xp >= 500) return "Pro";
+  return "Active";
+};
 
 const PodiumCard = ({ leader, rank, delay }: { leader: any; rank: number; delay: number }) => {
   const isGold = rank === 1;
@@ -83,7 +80,6 @@ const PodiumCard = ({ leader, rank, delay }: { leader: any; rank: number; delay:
         "bg-gradient-to-b from-white/10 to-transparent backdrop-blur-3xl",
         "group-hover:border-white/40"
       )}>
-        {/* Animated Background Gradient */}
         {isGold && (
           <div className="absolute inset-0 bg-[conic-gradient(from_0deg_at_50%_50%,#eab308_0%,transparent_20%,transparent_80%,#eab308_100%)] opacity-20 animate-[spin_8s_linear_infinite]" />
         )}
@@ -92,7 +88,6 @@ const PodiumCard = ({ leader, rank, delay }: { leader: any; rank: number; delay:
           "relative h-full flex flex-col items-center justify-center p-6 md:p-8 border-none bg-slate-950/80 rounded-[30px] md:rounded-[38px] transition-all",
           config?.height
         )}>
-          {/* Avatar with Ring */}
           <div className="relative mb-4 md:mb-6">
             <div className={cn(
               "absolute inset-0 rounded-full blur-xl opacity-30 animate-pulse",
@@ -116,7 +111,7 @@ const PodiumCard = ({ leader, rank, delay }: { leader: any; rank: number; delay:
               </span>
               {isGold && <Sparkles className="w-3 h-3 text-yellow-500" />}
             </div>
-            <h3 className="text-xl md:text-2xl font-black text-white mb-3 md:mb-4 tracking-tighter italic uppercase underline decoration-white/0 hover:decoration-white/20 transition-all cursor-default">
+            <h3 className="text-xl md:text-2xl font-black text-white mb-3 md:mb-4 tracking-tighter italic uppercase underline decoration-white/0 hover:decoration-white/20 transition-all cursor-default truncate max-w-[180px]">
               {leader.name}
             </h3>
             
@@ -126,7 +121,7 @@ const PodiumCard = ({ leader, rank, delay }: { leader: any; rank: number; delay:
                 <span className="text-xs md:text-sm font-mono text-white/40">.{(leader.earned % 1).toFixed(2).split('.')[1]}</span>
               </div>
               <p className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-blue-400 bg-blue-400/10 px-3 py-1 rounded-full border border-blue-400/20">
-                {leader.score.toLocaleString()} Pts
+                {leader.score.toLocaleString()} XP
               </p>
             </div>
           </div>
@@ -139,21 +134,77 @@ const PodiumCard = ({ leader, rank, delay }: { leader: any; rank: number; delay:
 export function Leaderboard() {
   const { stats } = useUser();
   const [searchQuery, setSearchQuery] = useState("");
+  const [dbLeaders, setDbLeaders] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch EXACT real-time top 9 users from Firebase
+  useEffect(() => {
+    const auth = getAuth();
+    const db = getDatabase();
+    
+    // We grab the last 10 just in case the current user is in it, so we can filter them out and still have 9
+    const topUsersQuery = query(ref(db, 'users'), orderByChild('xp'), limitToLast(10));
+    
+    const unsubscribe = onValue(topUsersQuery, (snapshot) => {
+      let fetchedLeaders: any[] = [];
+      const currentUid = auth.currentUser?.uid;
+      
+      if (snapshot.exists()) {
+        snapshot.forEach((childSnapshot) => {
+          const data = childSnapshot.val();
+          
+          // Skip the current user so they don't appear twice (since we pin them at 10th)
+          if (childSnapshot.key !== currentUid) {
+            const name = data.username || data.name || "Operator";
+            fetchedLeaders.push({
+              id: childSnapshot.key,
+              name: name,
+              score: data.xp || 0,
+              earned: data.balance || 0,
+              trend: "up",
+              avatar: name.substring(0, 2).toUpperCase(),
+              level: Math.floor((data.xp || 0) / 100) + 1,
+              badge: getBadgeByXP(data.xp || 0),
+              isCurrentUser: false
+            });
+          }
+        });
+        
+        // Firebase returns ascending order, reverse to descending (highest XP first)
+        fetchedLeaders.reverse();
+        
+        // Cap it exactly at 9 in case the limitToLast(10) returned 10 other users
+        fetchedLeaders = fetchedLeaders.slice(0, 9);
+      }
+
+      // Assign exact ranks 1 through 9
+      fetchedLeaders.forEach((leader, idx) => {
+        leader.rank = idx + 1;
+      });
+
+      setDbLeaders(fetchedLeaders);
+      setIsLoading(false);
+    });
+
+    return () => off(topUsersQuery, 'value', unsubscribe);
+  }, []);
   
+  // Create the Current User as the guaranteed 10th rank using their exact dashboard stats
   const currentUserData = {
-    id: 999,
-    name: "You (Pro Operator)",
-    score: stats.xp,
-    earned: stats.balance,
-    trend: "up",
-    avatar: "ME",
+    id: "current-user",
+    name: stats.username || "You",
+    score: stats.xp || 0,
+    earned: stats.balance || 0,
+    trend: "stable",
+    avatar: (stats.username || "U").substring(0, 2).toUpperCase(),
     rank: 10,
-    level: Math.floor(stats.xp / 100) + 1,
+    level: Math.floor((stats.xp || 0) / 100) + 1,
     badge: "Current User",
     isCurrentUser: true
   };
 
-  const allLeaders = [...MOCK_LEADERS, currentUserData];
+  // Combine fetched DB leaders with the 10th current user
+  const allLeaders = [...dbLeaders, currentUserData];
 
   const filteredLeaders = allLeaders.filter(l => 
     l.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -165,10 +216,8 @@ export function Leaderboard() {
 
   return (
     <div className="min-h-screen pb-40 px-4 md:px-8 relative overflow-hidden font-sans">
-      {/* Background with Noise Effect */}
       <div className="absolute inset-0 bg-noise opacity-20 pointer-events-none" />
       
-      {/* Dynamic Background Elements */}
       <div className="absolute top-0 left-1/4 w-[300px] md:w-[500px] h-[300px] md:h-[500px] bg-blue-500/10 blur-[80px] md:blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-0 right-1/4 w-[300px] md:w-[500px] h-[300px] md:h-[500px] bg-rose-500/5 blur-[80px] md:blur-[120px] rounded-full pointer-events-none" />
 
@@ -183,7 +232,6 @@ export function Leaderboard() {
           >
             <Zap className="w-3 h-3 md:w-4 md:h-4 fill-current animate-pulse" /> WEEKLY STANDINGS
             
-            {/* Tooltip */}
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 px-4 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-[10px] whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all pointer-events-none shadow-2xl z-50">
               <div className="flex items-center gap-2">
                 <Info className="w-3 h-3 text-blue-400" />
@@ -264,25 +312,32 @@ export function Leaderboard() {
                 className="w-full h-14 md:h-16 pl-12 pr-6 bg-white/[0.03] border border-white/5 rounded-2xl text-xs font-black uppercase tracking-widest text-white focus:ring-1 focus:ring-blue-500/30 focus:border-blue-500/30 outline-none transition-all placeholder:text-slate-700" 
               />
             </div>
-            
-            <div className="items-center gap-6 px-8 py-4 border-l border-white/5 hidden lg:flex shrink-0">
-               <div className="flex flex-col gap-1">
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Global Prize Pool</span>
-                  <span className="text-xl font-mono font-black text-white">$12,450.00</span>
-               </div>
-               <div className="w-10 h-10 rounded-full border border-blue-500/20 bg-blue-500/10 flex items-center justify-center">
-                  <Flame className="w-5 h-5 text-blue-400" />
-               </div>
-            </div>
           </div>
         </div>
 
-        {/* Podium Layout */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-8 lg:gap-12 mb-24 md:mb-32 items-end">
-          <PodiumCard leader={topThree.find(l => l.rank === 2)} rank={2} delay={0.4} />
-          <PodiumCard leader={topThree.find(l => l.rank === 1)} rank={1} delay={0.2} />
-          <PodiumCard leader={topThree.find(l => l.rank === 3)} rank={3} delay={0.6} />
-        </div>
+        {/* Podium OR Empty State Layout */}
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-6 w-full z-10 relative mb-24 md:mb-32">
+            <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
+            <span className="text-sm font-black text-blue-400 uppercase tracking-widest animate-pulse">Syncing Global Network...</span>
+          </div>
+        ) : topThree.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 gap-6 w-full z-10 relative bg-white/[0.02] border border-white/5 rounded-[40px] backdrop-blur-xl mb-24 md:mb-32 shadow-2xl">
+            <div className="w-20 h-20 bg-blue-500/10 rounded-full flex items-center justify-center border border-blue-500/20">
+              <ShieldCheck className="w-10 h-10 text-blue-400" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-xl md:text-2xl font-black text-white uppercase tracking-widest mb-2">Processing Operators</h3>
+              <p className="text-slate-500 text-sm font-medium">Awaiting network data. No other operators ranked yet.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-8 lg:gap-12 mb-24 md:mb-32 items-end">
+            <PodiumCard leader={topThree.find(l => l.rank === 2)} rank={2} delay={0.4} />
+            <PodiumCard leader={topThree.find(l => l.rank === 1)} rank={1} delay={0.2} />
+            <PodiumCard leader={topThree.find(l => l.rank === 3)} rank={3} delay={0.6} />
+          </div>
+        )}
 
         {/* Technical Data Grid */}
         <div className="relative group">
@@ -292,7 +347,7 @@ export function Leaderboard() {
             <div className="grid grid-cols-12 gap-4 px-6 md:px-10 py-5 md:py-6 border-b border-white/10 bg-white/[0.03]">
               <div className="col-span-2 sm:col-span-1 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Rank</div>
               <div className="col-span-7 sm:col-span-5 md:col-span-6 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Operator Identification</div>
-              <div className="hidden sm:block col-span-3 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">Performance Points</div>
+              <div className="hidden sm:block col-span-3 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">Performance XP</div>
               <div className="col-span-3 sm:col-span-3 md:col-span-2 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">Net Yield</div>
             </div>
 
@@ -365,7 +420,7 @@ export function Leaderboard() {
 
                     <div className="hidden sm:block col-span-3 text-right">
                       <div className="text-base md:text-lg font-black text-white group-hover/row:text-blue-400 transition-colors">
-                        {leader.score.toLocaleString()}
+                        {leader.score.toLocaleString()} XP
                       </div>
                     </div>
 
@@ -375,18 +430,11 @@ export function Leaderboard() {
                            <span className="text-sm md:text-base font-black text-blue-500 tracking-tighter">
                              ${leader.earned.toFixed(2)}
                            </span>
-                           {leader.trend === "up" ? (
-                             <ArrowUpRight className="w-3 h-3 md:w-4 md:h-4 text-green-500 animate-pulse" />
-                           ) : leader.trend === "down" ? (
-                             <ArrowDownRight className="w-3 h-3 md:w-4 md:h-4 text-rose-500" />
-                           ) : (
-                             <Minus className="w-3 h-3 md:w-4 md:h-4 text-slate-600" />
-                           )}
                         </div>
                         <div className="h-1 w-8 md:w-12 bg-white/5 rounded-full overflow-hidden">
                            <motion.div 
                               initial={{ width: 0 }}
-                              whileInView={{ width: `${(leader.score / 15000) * 100}%` }}
+                              whileInView={{ width: `${Math.min((leader.score / 15000) * 100, 100)}%` }}
                               className="h-full bg-blue-500"
                            />
                         </div>
@@ -397,57 +445,6 @@ export function Leaderboard() {
               </AnimatePresence>
             </div>
           </div>
-        </div>
-
-        {/* Global Stats Footer */}
-        <div className="mt-24 md:mt-40 flex justify-center">
-           {[
-             { 
-               label: "Active Members", 
-               value: "1,240,512", 
-               icon: <Target className="w-6 h-6 md:w-8 md:h-8 text-blue-500" />,
-               color: "blue",
-               description: "Users Currently Active"
-             },
-           ].map((stat, i) => (
-             <motion.div 
-               key={i}
-               initial={{ opacity: 0, y: 30 }}
-               whileInView={{ opacity: 1, y: 0 }}
-               viewport={{ once: true }}
-               transition={{ delay: i * 0.2, duration: 0.8 }}
-               className="relative group h-64 md:h-80 w-full max-w-2xl"
-             >
-                {/* Background Glow */}
-                <div className={cn(
-                  "absolute inset-0 blur-[120px] opacity-20 transition-opacity group-hover:opacity-30 rounded-full bg-blue-600"
-                )} />
-
-                {/* Animated Border Wrapper */}
-                <div className="absolute inset-0 rounded-[48px] p-[2px] overflow-hidden">
-                  <div className="absolute inset-0 bg-slate-900" />
-                  <div className="absolute inset-[-100%] bg-[conic-gradient(from_0deg_at_50%_50%,#3b82f6_0%,transparent_20%,transparent_80%,#3b82f6_100%)] animate-[spin_4s_linear_infinite] opacity-40" />
-                  
-                  <div className="relative h-full w-full p-8 md:p-12 rounded-[46px] bg-slate-950/90 flex flex-col justify-end overflow-hidden group hover:bg-slate-900/90 transition-all backdrop-blur-3xl">
-                    {/* Decorative Background Icon (Restored) */}
-                    <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:opacity-10 transition-all duration-700 pointer-events-none transform translate-x-1/4 -translate-y-1/4 group-hover:translate-x-0 group-hover:translate-y-0">
-                      {React.cloneElement(stat.icon as React.ReactElement, { className: "w-64 h-64 md:w-80 md:h-80" })}
-                    </div>
-
-                    <div className="relative z-10">
-                      <div className="flex flex-col">
-                          <p className="text-[10px] md:text-xs font-black text-slate-500 uppercase tracking-[0.5em] mb-3">{stat.label}</p>
-                          <p className="text-5xl md:text-8xl font-mono font-black text-white tracking-tighter leading-none">{stat.value}</p>
-                          <p className="mt-6 text-xs md:text-sm text-blue-500/80 font-bold tracking-widest uppercase flex items-center gap-2">
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                            {stat.description}
-                          </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-             </motion.div>
-           ))}
         </div>
 
       </div>
