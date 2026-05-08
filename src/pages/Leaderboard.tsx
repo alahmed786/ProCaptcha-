@@ -137,82 +137,94 @@ export function Leaderboard() {
   const [dbLeaders, setDbLeaders] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch EXACT real-time top 9 users from Firebase
   useEffect(() => {
     const auth = getAuth();
     const db = getDatabase();
     
-    // We grab the last 10 just in case the current user is in it, so we can filter them out and still have 9
+    // Fetch Top 10 users by XP
     const topUsersQuery = query(ref(db, 'users'), orderByChild('xp'), limitToLast(10));
     
+    // Safety Fallback: Stop loading spinner if Firebase takes too long or DB is empty
+    const timeoutId = setTimeout(() => {
+      setIsLoading(false);
+    }, 5000);
+
     const unsubscribe = onValue(topUsersQuery, (snapshot) => {
+      clearTimeout(timeoutId); // Network responded, clear the safety timeout
       let fetchedLeaders: any[] = [];
       const currentUid = auth.currentUser?.uid;
       
       if (snapshot.exists()) {
         snapshot.forEach((childSnapshot) => {
           const data = childSnapshot.val();
-          
-          // Skip the current user so they don't appear twice (since we pin them at 10th)
-          if (childSnapshot.key !== currentUid) {
-            const name = data.username || data.name || "Operator";
-            fetchedLeaders.push({
-              id: childSnapshot.key,
-              name: name,
-              score: data.xp || 0,
-              earned: data.balance || 0,
-              trend: "up",
-              avatar: name.substring(0, 2).toUpperCase(),
-              level: Math.floor((data.xp || 0) / 100) + 1,
-              badge: getBadgeByXP(data.xp || 0),
-              isCurrentUser: false
-            });
-          }
+          const name = data.username || data.name || "Operator";
+          fetchedLeaders.push({
+            id: childSnapshot.key,
+            name: name,
+            score: data.xp || 0,
+            earned: data.balance || 0,
+            trend: "up",
+            avatar: name.substring(0, 2).toUpperCase(),
+            level: Math.floor((data.xp || 0) / 100) + 1,
+            badge: getBadgeByXP(data.xp || 0),
+            isCurrentUser: childSnapshot.key === currentUid
+          });
         });
         
-        // Firebase returns ascending order, reverse to descending (highest XP first)
-        fetchedLeaders.reverse();
-        
-        // Cap it exactly at 9 in case the limitToLast(10) returned 10 other users
-        fetchedLeaders = fetchedLeaders.slice(0, 9);
+        // Sort explicitly by score (highest XP first)
+        fetchedLeaders.sort((a, b) => b.score - a.score);
       }
 
-      // Assign exact ranks 1 through 9
+      // Assign exact ranks sequentially (1, 2, 3...)
       fetchedLeaders.forEach((leader, idx) => {
         leader.rank = idx + 1;
       });
 
       setDbLeaders(fetchedLeaders);
       setIsLoading(false);
+    }, (error) => {
+      console.error("Firebase Leaderboard Error:", error);
+      clearTimeout(timeoutId);
+      setIsLoading(false);
     });
 
-    return () => off(topUsersQuery, 'value', unsubscribe);
+    return () => {
+      clearTimeout(timeoutId);
+      off(topUsersQuery, 'value', unsubscribe);
+    };
   }, []);
   
-  // Create the Current User as the guaranteed 10th rank using their exact dashboard stats
-  const currentUserData = {
-    id: "current-user",
-    name: stats.username || "You",
-    score: stats.xp || 0,
-    earned: stats.balance || 0,
-    trend: "stable",
-    avatar: (stats.username || "U").substring(0, 2).toUpperCase(),
-    rank: 10,
-    level: Math.floor((stats.xp || 0) / 100) + 1,
-    badge: "Current User",
-    isCurrentUser: true
-  };
+  const currentUid = getAuth().currentUser?.uid;
+  let allLeaders = [...dbLeaders];
 
-  // Combine fetched DB leaders with the 10th current user
-  const allLeaders = [...dbLeaders, currentUserData];
+  // If there are >10 users and the current user missed the Top 10, append them safely to the bottom
+  const isUserInTop10 = allLeaders.some(l => l.isCurrentUser);
+  if (!isUserInTop10 && currentUid && stats.xp !== undefined) {
+    allLeaders.push({
+      id: currentUid,
+      name: stats.username || "You",
+      score: stats.xp || 0,
+      earned: stats.balance || 0,
+      trend: "stable",
+      avatar: (stats.username || "U").substring(0, 2).toUpperCase(),
+      rank: "-", // Unranked indicator
+      level: Math.floor((stats.xp || 0) / 100) + 1,
+      badge: getBadgeByXP(stats.xp || 0),
+      isCurrentUser: true
+    });
+  }
 
   const filteredLeaders = allLeaders.filter(l => 
     l.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     l.badge.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const topThree = filteredLeaders.filter(l => l.rank <= 3);
-  const others = filteredLeaders.filter(l => l.rank > 3).sort((a, b) => a.rank - b.rank);
+  const topThree = filteredLeaders.filter(l => l.rank !== "-" && l.rank <= 3);
+  const others = filteredLeaders.filter(l => l.rank === "-" || l.rank > 3).sort((a, b) => {
+    if (a.rank === "-") return 1;
+    if (b.rank === "-") return -1;
+    return a.rank - b.rank;
+  });
 
   return (
     <div className="min-h-screen pb-40 px-4 md:px-8 relative overflow-hidden font-sans">
@@ -321,14 +333,14 @@ export function Leaderboard() {
             <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
             <span className="text-sm font-black text-blue-400 uppercase tracking-widest animate-pulse">Syncing Global Network...</span>
           </div>
-        ) : topThree.length === 0 ? (
+        ) : allLeaders.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 gap-6 w-full z-10 relative bg-white/[0.02] border border-white/5 rounded-[40px] backdrop-blur-xl mb-24 md:mb-32 shadow-2xl">
             <div className="w-20 h-20 bg-blue-500/10 rounded-full flex items-center justify-center border border-blue-500/20">
               <ShieldCheck className="w-10 h-10 text-blue-400" />
             </div>
             <div className="text-center">
-              <h3 className="text-xl md:text-2xl font-black text-white uppercase tracking-widest mb-2">Processing Operators</h3>
-              <p className="text-slate-500 text-sm font-medium">Awaiting network data. No other operators ranked yet.</p>
+              <h3 className="text-xl md:text-2xl font-black text-white uppercase tracking-widest mb-2">No Ranked Operators Yet</h3>
+              <p className="text-slate-500 text-sm font-medium">Start solving captchas and earn weekly rewards to claim the top spot!</p>
             </div>
           </div>
         ) : (
@@ -340,112 +352,114 @@ export function Leaderboard() {
         )}
 
         {/* Technical Data Grid */}
-        <div className="relative group">
-          <div className="absolute inset-0 bg-gradient-to-b from-blue-500/5 to-transparent rounded-[24px] md:rounded-[40px] opacity-0 group-hover:opacity-100 transition-opacity duration-1000" />
-          
-          <div className="relative bg-white/[0.03] backdrop-blur-3xl rounded-[24px] md:rounded-[40px] border border-white/10 overflow-hidden shadow-2xl">
-            <div className="grid grid-cols-12 gap-4 px-6 md:px-10 py-5 md:py-6 border-b border-white/10 bg-white/[0.03]">
-              <div className="col-span-2 sm:col-span-1 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Rank</div>
-              <div className="col-span-7 sm:col-span-5 md:col-span-6 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Operator Identification</div>
-              <div className="hidden sm:block col-span-3 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">Performance XP</div>
-              <div className="col-span-3 sm:col-span-3 md:col-span-2 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">Net Yield</div>
-            </div>
+        {others.length > 0 && (
+          <div className="relative group">
+            <div className="absolute inset-0 bg-gradient-to-b from-blue-500/5 to-transparent rounded-[24px] md:rounded-[40px] opacity-0 group-hover:opacity-100 transition-opacity duration-1000" />
+            
+            <div className="relative bg-white/[0.03] backdrop-blur-3xl rounded-[24px] md:rounded-[40px] border border-white/10 overflow-hidden shadow-2xl">
+              <div className="grid grid-cols-12 gap-4 px-6 md:px-10 py-5 md:py-6 border-b border-white/10 bg-white/[0.03]">
+                <div className="col-span-2 sm:col-span-1 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Rank</div>
+                <div className="col-span-7 sm:col-span-5 md:col-span-6 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Operator Identification</div>
+                <div className="hidden sm:block col-span-3 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">Performance XP</div>
+                <div className="col-span-3 sm:col-span-3 md:col-span-2 text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">Net Yield</div>
+              </div>
 
-            <div className="divide-y divide-white/5 font-mono">
-              <AnimatePresence mode="popLayout">
-                {others.map((leader, index) => (
-                  <motion.div 
-                    layout
-                    key={leader.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    whileHover={{ scale: 1.01, backgroundColor: "rgba(255, 255, 255, 0.05)" }}
-                    whileTap={{ scale: 0.99 }}
-                    transition={{ delay: 0.1 + (index * 0.05) }}
-                    className={cn(
-                      "grid grid-cols-12 gap-4 items-center px-6 md:px-10 py-5 md:py-6 transition-all group/row cursor-pointer",
-                      leader.isCurrentUser && "bg-blue-500/5 border-y border-blue-500/10"
-                    )}
-                  >
-                    <div className="col-span-2 sm:col-span-1">
-                      <span className={cn(
-                        "text-xs md:text-sm font-black transition-colors",
-                        leader.isCurrentUser ? "text-blue-400" : "text-slate-500 group-hover/row:text-blue-500"
-                      )}>
-                        #{leader.rank.toString().padStart(2, '0')}
-                      </span>
-                    </div>
-                    
-                    <div className="col-span-7 sm:col-span-5 md:col-span-6 flex items-center gap-3 md:gap-6 font-sans">
-                      <div className="relative shrink-0">
-                        <div className={cn(
-                          "w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl border flex items-center justify-center text-xs md:text-sm font-black transition-all",
-                          leader.isCurrentUser ? "bg-blue-600 border-blue-400 text-white shadow-[0_0_15px_rgba(59,130,246,0.3)]" : "bg-black border-white/10 text-white group-hover/row:border-blue-500/50"
+              <div className="divide-y divide-white/5 font-mono">
+                <AnimatePresence mode="popLayout">
+                  {others.map((leader, index) => (
+                    <motion.div 
+                      layout
+                      key={leader.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      whileHover={{ scale: 1.01, backgroundColor: "rgba(255, 255, 255, 0.05)" }}
+                      whileTap={{ scale: 0.99 }}
+                      transition={{ delay: 0.1 + (index * 0.05) }}
+                      className={cn(
+                        "grid grid-cols-12 gap-4 items-center px-6 md:px-10 py-5 md:py-6 transition-all group/row cursor-pointer",
+                        leader.isCurrentUser && "bg-blue-500/5 border-y border-blue-500/10"
+                      )}
+                    >
+                      <div className="col-span-2 sm:col-span-1">
+                        <span className={cn(
+                          "text-xs md:text-sm font-black transition-colors",
+                          leader.isCurrentUser ? "text-blue-400" : "text-slate-500 group-hover/row:text-blue-500"
                         )}>
-                          {leader.avatar}
-                        </div>
-                        <div className={cn(
-                          "absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-950",
-                          leader.isCurrentUser ? "bg-blue-400 animate-ping" : "bg-green-500"
-                        )} />
+                          #{leader.rank.toString().padStart(2, '0')}
+                        </span>
                       </div>
                       
-                      <div className="flex flex-col min-w-0">
-                        <div className="flex items-center gap-2 md:gap-3 overflow-hidden">
-                          <span className={cn(
-                            "text-sm md:text-base font-black tracking-tight transition-colors uppercase truncate",
-                            leader.isCurrentUser ? "text-blue-300" : "text-white group-hover/row:text-blue-400"
+                      <div className="col-span-7 sm:col-span-5 md:col-span-6 flex items-center gap-3 md:gap-6 font-sans">
+                        <div className="relative shrink-0">
+                          <div className={cn(
+                            "w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl border flex items-center justify-center text-xs md:text-sm font-black transition-all",
+                            leader.isCurrentUser ? "bg-blue-600 border-blue-400 text-white shadow-[0_0_15px_rgba(59,130,246,0.3)]" : "bg-black border-white/10 text-white group-hover/row:border-blue-500/50"
                           )}>
-                            {leader.name}
-                          </span>
-                          <span className={cn(
-                            "hidden xs:block px-2 py-0.5 rounded-md border text-[8px] md:text-[9px] font-black uppercase tracking-widest transition-all",
-                            leader.isCurrentUser ? "bg-blue-500/20 border-blue-500/30 text-blue-300" : "bg-white/5 border border-white/5 text-slate-500 group-hover/row:border-white/10"
-                          )}>
-                            {leader.badge}
-                          </span>
+                            {leader.avatar}
+                          </div>
+                          <div className={cn(
+                            "absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-950",
+                            leader.isCurrentUser ? "bg-blue-400 animate-ping" : "bg-green-500"
+                          )} />
                         </div>
-                        <div className="flex items-center gap-3 md:gap-4 mt-0.5 md:mt-1">
-                           <div className="flex items-center gap-1 grayscale group-hover/row:grayscale-0 transition-all">
-                              <ShieldCheck className="w-2.5 h-2.5 md:w-3 md:h-3 text-emerald-500" />
-                              <span className="text-[8px] md:text-[10px] font-black text-slate-600 uppercase tracking-tighter">LVL {leader.level}</span>
-                           </div>
-                           <div className="hidden sm:flex items-center gap-1.5">
-                              <Target className="w-3 h-3 text-rose-500/50" />
-                              <span className="text-[10px] font-black text-slate-600 uppercase tracking-tighter italic">Accuracy: 99%</span>
-                           </div>
+                        
+                        <div className="flex flex-col min-w-0">
+                          <div className="flex items-center gap-2 md:gap-3 overflow-hidden">
+                            <span className={cn(
+                              "text-sm md:text-base font-black tracking-tight transition-colors uppercase truncate",
+                              leader.isCurrentUser ? "text-blue-300" : "text-white group-hover/row:text-blue-400"
+                            )}>
+                              {leader.name}
+                            </span>
+                            <span className={cn(
+                              "hidden xs:block px-2 py-0.5 rounded-md border text-[8px] md:text-[9px] font-black uppercase tracking-widest transition-all",
+                              leader.isCurrentUser ? "bg-blue-500/20 border-blue-500/30 text-blue-300" : "bg-white/5 border border-white/5 text-slate-500 group-hover/row:border-white/10"
+                            )}>
+                              {leader.badge}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 md:gap-4 mt-0.5 md:mt-1">
+                             <div className="flex items-center gap-1 grayscale group-hover/row:grayscale-0 transition-all">
+                                <ShieldCheck className="w-2.5 h-2.5 md:w-3 md:h-3 text-emerald-500" />
+                                <span className="text-[8px] md:text-[10px] font-black text-slate-600 uppercase tracking-tighter">LVL {leader.level}</span>
+                             </div>
+                             <div className="hidden sm:flex items-center gap-1.5">
+                                <Target className="w-3 h-3 text-rose-500/50" />
+                                <span className="text-[10px] font-black text-slate-600 uppercase tracking-tighter italic">Accuracy: 99%</span>
+                             </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="hidden sm:block col-span-3 text-right">
-                      <div className="text-base md:text-lg font-black text-white group-hover/row:text-blue-400 transition-colors">
-                        {leader.score.toLocaleString()} XP
+                      <div className="hidden sm:block col-span-3 text-right">
+                        <div className="text-base md:text-lg font-black text-white group-hover/row:text-blue-400 transition-colors">
+                          {leader.score.toLocaleString()} XP
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="col-span-3 sm:col-span-3 md:col-span-2 text-right">
-                      <div className="flex flex-col items-end gap-0.5 md:gap-1">
-                        <div className="flex items-center gap-1.5 md:gap-2">
-                           <span className="text-sm md:text-base font-black text-blue-500 tracking-tighter">
-                             ${leader.earned.toFixed(2)}
-                           </span>
-                        </div>
-                        <div className="h-1 w-8 md:w-12 bg-white/5 rounded-full overflow-hidden">
-                           <motion.div 
-                              initial={{ width: 0 }}
-                              whileInView={{ width: `${Math.min((leader.score / 15000) * 100, 100)}%` }}
-                              className="h-full bg-blue-500"
-                           />
+                      <div className="col-span-3 sm:col-span-3 md:col-span-2 text-right">
+                        <div className="flex flex-col items-end gap-0.5 md:gap-1">
+                          <div className="flex items-center gap-1.5 md:gap-2">
+                             <span className="text-sm md:text-base font-black text-blue-500 tracking-tighter">
+                               ${leader.earned.toFixed(2)}
+                             </span>
+                          </div>
+                          <div className="h-1 w-8 md:w-12 bg-white/5 rounded-full overflow-hidden">
+                             <motion.div 
+                                initial={{ width: 0 }}
+                                whileInView={{ width: `${Math.min((leader.score / 15000) * 100, 100)}%` }}
+                                className="h-full bg-blue-500"
+                             />
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
       </div>
     </div>
