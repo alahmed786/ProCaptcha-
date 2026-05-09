@@ -37,6 +37,9 @@ const useCountdown = (targetDate: number) => {
   const [timeLeft, setTimeLeft] = useState(targetDate - Date.now());
 
   useEffect(() => {
+    // Stop the countdown if the target date is 0 (loading state)
+    if (targetDate === 0) return; 
+
     const interval = setInterval(() => {
       const remaining = targetDate - Date.now();
       setTimeLeft(Math.max(0, remaining));
@@ -46,6 +49,7 @@ const useCountdown = (targetDate: number) => {
   }, [targetDate]);
 
   const format = () => {
+    if (targetDate === 0) return "00:00:00";
     const hours = Math.floor(timeLeft / (1000 * 60 * 60));
     const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
@@ -225,7 +229,6 @@ export function Leaderboard() {
     const db = getDatabase();
     const auth = getAuth();
     
-    // Fetch individual leaderboard config for Admin Control
     const configRef = ref(db, 'leaderboard_config');
     const unsubscribeConfig = onValue(configRef, (snapshot) => {
       const data = snapshot.val();
@@ -235,7 +238,6 @@ export function Leaderboard() {
     const usersRef = ref(db, 'users');
     const topUsersQuery = query(usersRef, orderByChild('xp'), limitToLast(50));
     
-    // Fallback if DB is empty or slow
     const timeoutId = setTimeout(() => setLoading(false), 5000);
 
     const unsubscribeUsers = onValue(topUsersQuery, (snapshot) => {
@@ -294,23 +296,23 @@ export function Leaderboard() {
   }
 
   allLeaders.sort((a, b) => b.score - a.score);
-
-  allLeaders.forEach((leader, idx) => {
-    leader.rank = idx + 1;
-  });
+  allLeaders.forEach((leader, idx) => { leader.rank = idx + 1; });
 
   const now = Date.now();
-  const roundEndTime = config?.roundEndTime || (now + 1000 * 60 * 60 * 24);
-  const rewardEndTime = config?.rewardEndTime || (roundEndTime + 1000 * 60 * 60 * 24);
-  const nextRoundStartTime = config?.nextRoundStartTime || (rewardEndTime + 1000 * 60 * 60);
+  
+  // THE BUG FIX: Only load the countdowns if config exists! No more moving targets.
+  const roundEndTime = config?.roundEndTime || 0;
+  const rewardEndTime = config?.rewardEndTime || 0;
+  const nextRoundStartTime = config?.nextRoundStartTime || 0;
 
-  const status = now < roundEndTime ? "ACTIVE" : now < rewardEndTime ? "RESULTS" : "MAINTENANCE";
+  const status = !config ? "LOADING" : (now < roundEndTime ? "ACTIVE" : now < rewardEndTime ? "RESULTS" : "MAINTENANCE");
 
   const { formatted: activeCountdown } = useCountdown(roundEndTime);
   const { formatted: rewardCountdown } = useCountdown(rewardEndTime);
   const { formatted: nextRoundCountdown } = useCountdown(nextRoundStartTime);
 
   const currentUser = allLeaders.find(l => l.isCurrentUser);
+  // QUALIFIES IF RANK IS 1 THROUGH 9
   const isQualified = currentUser && currentUser.rank <= 9;
 
   const filteredLeaders = allLeaders.filter(l => 
@@ -421,7 +423,6 @@ export function Leaderboard() {
             </div>
             <div className="flex flex-col">
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-0.5">System Status</span>
-              {/* 👇 THE FIX: Dynamic Live Countdown Timer reading from Backend Config 👇 */}
               <span className="text-xs md:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
                 {status === "ACTIVE" ? (
                   <>RESET IN: <span className="text-blue-400 font-mono tracking-widest">{activeCountdown}</span></>
@@ -449,7 +450,7 @@ export function Leaderboard() {
         </div>
 
         {/* Podium Layout */}
-        {loading ? (
+        {loading || status === "LOADING" ? (
           <div className="h-96 flex flex-col items-center justify-center gap-6">
             <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
             <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">Synchronizing Data...</span>
