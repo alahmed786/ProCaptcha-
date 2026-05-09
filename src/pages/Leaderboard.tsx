@@ -33,23 +33,30 @@ interface LeaderboardConfig {
   rewardCode: string;
 }
 
+// FIX 1: Bulletproof Countdown Hook that reacts to dynamic database changes
 const useCountdown = (targetDate: number) => {
-  const [timeLeft, setTimeLeft] = useState(targetDate - Date.now());
+  const [timeLeft, setTimeLeft] = useState(Math.max(0, targetDate - Date.now()));
 
   useEffect(() => {
-    // Stop the countdown if the target date is 0 (loading state)
-    if (targetDate === 0) return; 
+    if (targetDate <= 0) {
+      setTimeLeft(0);
+      return;
+    }
+
+    // Instantly sync the time when the targetDate updates from Firebase
+    setTimeLeft(Math.max(0, targetDate - Date.now()));
 
     const interval = setInterval(() => {
       const remaining = targetDate - Date.now();
       setTimeLeft(Math.max(0, remaining));
       if (remaining <= 0) clearInterval(interval);
     }, 1000);
+
     return () => clearInterval(interval);
   }, [targetDate]);
 
   const format = () => {
-    if (targetDate === 0) return "00:00:00";
+    if (targetDate <= 0) return "00:00:00";
     const hours = Math.floor(timeLeft / (1000 * 60 * 60));
     const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
@@ -229,16 +236,32 @@ export function Leaderboard() {
     const db = getDatabase();
     const auth = getAuth();
     
+    // FETCH CONFIG WITH FALLBACK
     const configRef = ref(db, 'leaderboard_config');
     const unsubscribeConfig = onValue(configRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) setConfig(data);
+      if (snapshot.exists()) {
+        setConfig(snapshot.val());
+      } else {
+        // FIX 2: If the Admin App hasn't deployed a cycle yet, inject a temporary static fallback
+        // so the UI unfreezes and works perfectly until the admin sets the real time!
+        const staticNow = Date.now();
+        setConfig({
+          roundEndTime: staticNow + (1000 * 60 * 60 * 24 * 7),
+          rewardEndTime: staticNow + (1000 * 60 * 60 * 24 * 8),
+          nextRoundStartTime: staticNow + (1000 * 60 * 60 * 24 * 8),
+          rewardCode: "PENDING-ADMIN"
+        });
+      }
     });
 
+    // FETCH USERS
     const usersRef = ref(db, 'users');
     const topUsersQuery = query(usersRef, orderByChild('xp'), limitToLast(50));
     
-    const timeoutId = setTimeout(() => setLoading(false), 5000);
+    // Ensure loading stops even if network fails
+    const timeoutId = setTimeout(() => {
+      setLoading(false);
+    }, 5000);
 
     const unsubscribeUsers = onValue(topUsersQuery, (snapshot) => {
       clearTimeout(timeoutId);
@@ -300,19 +323,18 @@ export function Leaderboard() {
 
   const now = Date.now();
   
-  // THE BUG FIX: Only load the countdowns if config exists! No more moving targets.
   const roundEndTime = config?.roundEndTime || 0;
   const rewardEndTime = config?.rewardEndTime || 0;
   const nextRoundStartTime = config?.nextRoundStartTime || 0;
 
-  const status = !config ? "LOADING" : (now < roundEndTime ? "ACTIVE" : now < rewardEndTime ? "RESULTS" : "MAINTENANCE");
+  // FIX 3: Loading state is strictly controlled by the 'loading' boolean now, preventing freezes.
+  const status = now < roundEndTime ? "ACTIVE" : now < rewardEndTime ? "RESULTS" : "MAINTENANCE";
 
   const { formatted: activeCountdown } = useCountdown(roundEndTime);
   const { formatted: rewardCountdown } = useCountdown(rewardEndTime);
   const { formatted: nextRoundCountdown } = useCountdown(nextRoundStartTime);
 
   const currentUser = allLeaders.find(l => l.isCurrentUser);
-  // QUALIFIES IF RANK IS 1 THROUGH 9
   const isQualified = currentUser && currentUser.rank <= 9;
 
   const filteredLeaders = allLeaders.filter(l => 
@@ -450,7 +472,7 @@ export function Leaderboard() {
         </div>
 
         {/* Podium Layout */}
-        {loading || status === "LOADING" ? (
+        {loading ? (
           <div className="h-96 flex flex-col items-center justify-center gap-6">
             <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
             <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">Synchronizing Data...</span>
