@@ -103,7 +103,7 @@ const PodiumCard = ({ leader, rank, delay }: { leader: Leader | undefined; rank:
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ delay, duration: 0.5 }}
-        className={cn("relative group", config?.order, "z-10 opacity-40")}
+        className={cn("relative group w-full", config?.order, "z-10 opacity-40")}
       >
         <Card className={cn(
           "relative h-full flex flex-col items-center justify-center p-6 md:p-8 border border-white/5 bg-slate-950/40 rounded-[30px] md:rounded-[38px] transition-all",
@@ -214,7 +214,7 @@ const PodiumCard = ({ leader, rank, delay }: { leader: Leader | undefined; rank:
 };
 
 export function Leaderboard() {
-  const { stats } = useUser(); // Using exact 'stats' from context
+  const { stats } = useUser();
   const [leaders, setLeaders] = useState<Leader[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -225,7 +225,7 @@ export function Leaderboard() {
     const db = getDatabase();
     const auth = getAuth();
     
-    // Fetch individual leaderboard config
+    // Fetch individual leaderboard config for Admin Control
     const configRef = ref(db, 'leaderboard_config');
     const unsubscribeConfig = onValue(configRef, (snapshot) => {
       const data = snapshot.val();
@@ -274,11 +274,9 @@ export function Leaderboard() {
     };
   }, []);
 
-  // SMART RANKING ENGINE
   const currentUid = getAuth().currentUser?.uid;
   let allLeaders = [...leaders];
 
-  // 1. Ensure the current user is always included in the calculation using dashboard stats
   const isUserInList = allLeaders.some(l => l.id === currentUid || l.name === stats.username);
   
   if (!isUserInList && stats.username) {
@@ -295,10 +293,8 @@ export function Leaderboard() {
     });
   }
 
-  // 2. Sort absolutely everyone globally by XP
   allLeaders.sort((a, b) => b.score - a.score);
 
-  // 3. Hand out strictly formatted numerical ranks (1, 2, 3...)
   allLeaders.forEach((leader, idx) => {
     leader.rank = idx + 1;
   });
@@ -420,12 +416,21 @@ export function Leaderboard() {
         {/* Global Controls */}
         <div className="flex flex-col lg:flex-row gap-6 md:gap-8 items-center justify-between mb-16 md:mb-20 p-3 md:p-4 rounded-[24px] md:rounded-[32px] bg-white/[0.02] border border-white/5 backdrop-blur-xl">
           <div className="relative flex items-center gap-4 px-6 py-4 md:py-6 bg-slate-950/90 rounded-[15px] border border-white/5 flex-1 w-full backdrop-blur-xl">
-            <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
               <Info className="w-5 h-5 text-rose-500" />
             </div>
             <div className="flex flex-col">
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-0.5">System Status</span>
-              <span className="text-xs md:text-sm font-bold text-white uppercase tracking-wider">Leaderboard stats reset every 7 days</span>
+              {/* 👇 THE FIX: Dynamic Live Countdown Timer reading from Backend Config 👇 */}
+              <span className="text-xs md:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                {status === "ACTIVE" ? (
+                  <>RESET IN: <span className="text-blue-400 font-mono tracking-widest">{activeCountdown}</span></>
+                ) : status === "RESULTS" ? (
+                  <>REWARDS EXPIRE IN: <span className="text-rose-400 font-mono tracking-widest">{rewardCountdown}</span></>
+                ) : (
+                  <>NEXT ROUND IN: <span className="text-emerald-400 font-mono tracking-widest">{nextRoundCountdown}</span></>
+                )}
+              </span>
             </div>
           </div>
 
@@ -532,14 +537,12 @@ export function Leaderboard() {
           </div>
         ) : (
           <>
-            {/* The Podium ALWAYS uses grid-cols-3 to keep Rank 1 securely in the middle */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-8 lg:gap-12 mb-24 md:mb-32 items-end">
               <PodiumCard leader={topThree.find(l => l.rank === 2)} rank={2} delay={0.4} />
               <PodiumCard leader={topThree.find(l => l.rank === 1)} rank={1} delay={0.2} />
               <PodiumCard leader={topThree.find(l => l.rank === 3)} rank={3} delay={0.6} />
             </div>
 
-            {/* Render Technical Grid ONLY if there are operators with rank 4 or lower */}
             {others.length > 0 && (
               <div className="relative group">
                 <div className="absolute inset-0 bg-gradient-to-b from-blue-500/5 to-transparent rounded-[24px] md:rounded-[40px] opacity-0 group-hover:opacity-100 transition-opacity duration-1000" />
