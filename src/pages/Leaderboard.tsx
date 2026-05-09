@@ -4,7 +4,7 @@ import {
   Trophy, Medal, Star, TrendingUp, Crown, 
   ArrowUpRight, ArrowDownRight, Minus, Sparkles, 
   Zap, ShieldCheck, Flame, Target, Info, Search,
-  Rocket, ChevronRight, Lock, AlertCircle, Timer, Eye, EyeOff, Clock
+  Rocket, ChevronRight, Lock, AlertCircle, Timer, Eye, EyeOff, Clock, Gift
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Card } from "../components/ui/Card";
@@ -33,30 +33,29 @@ interface LeaderboardConfig {
   rewardCode: string;
 }
 
-// FIX 1: Bulletproof Countdown Hook that reacts to dynamic database changes
-const useCountdown = (targetDate: number) => {
-  const [timeLeft, setTimeLeft] = useState(Math.max(0, targetDate - Date.now()));
+const useCountdown = (targetDate: number | undefined) => {
+  const parsedTarget = Number(targetDate) || 0;
+  const [timeLeft, setTimeLeft] = useState(Math.max(0, parsedTarget - Date.now()));
 
   useEffect(() => {
-    if (targetDate <= 0) {
+    if (parsedTarget <= 0) {
       setTimeLeft(0);
       return;
     }
 
-    // Instantly sync the time when the targetDate updates from Firebase
-    setTimeLeft(Math.max(0, targetDate - Date.now()));
+    setTimeLeft(Math.max(0, parsedTarget - Date.now()));
 
     const interval = setInterval(() => {
-      const remaining = targetDate - Date.now();
+      const remaining = parsedTarget - Date.now();
       setTimeLeft(Math.max(0, remaining));
       if (remaining <= 0) clearInterval(interval);
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [targetDate]);
+  }, [parsedTarget]);
 
   const format = () => {
-    if (targetDate <= 0) return "00:00:00";
+    if (parsedTarget <= 0) return "00:00:00";
     const hours = Math.floor(timeLeft / (1000 * 60 * 60));
     const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
@@ -230,35 +229,25 @@ export function Leaderboard() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [config, setConfig] = useState<LeaderboardConfig | null>(null);
+  const [status, setStatus] = useState<"ACTIVE" | "RESULTS" | "MAINTENANCE">("MAINTENANCE");
   const [showCode, setShowCode] = useState(false);
 
   useEffect(() => {
     const db = getDatabase();
     const auth = getAuth();
     
-    // FETCH CONFIG WITH FALLBACK
     const configRef = ref(db, 'leaderboard_config');
     const unsubscribeConfig = onValue(configRef, (snapshot) => {
       if (snapshot.exists()) {
         setConfig(snapshot.val());
       } else {
-        // FIX 2: If the Admin App hasn't deployed a cycle yet, inject a temporary static fallback
-        // so the UI unfreezes and works perfectly until the admin sets the real time!
-        const staticNow = Date.now();
-        setConfig({
-          roundEndTime: staticNow + (1000 * 60 * 60 * 24 * 7),
-          rewardEndTime: staticNow + (1000 * 60 * 60 * 24 * 8),
-          nextRoundStartTime: staticNow + (1000 * 60 * 60 * 24 * 8),
-          rewardCode: "PENDING-ADMIN"
-        });
+        setConfig(null);
       }
     });
 
-    // FETCH USERS
     const usersRef = ref(db, 'users');
     const topUsersQuery = query(usersRef, orderByChild('xp'), limitToLast(50));
     
-    // Ensure loading stops even if network fails
     const timeoutId = setTimeout(() => {
       setLoading(false);
     }, 5000);
@@ -299,6 +288,32 @@ export function Leaderboard() {
     };
   }, []);
 
+  // Dynamic Status Evaluator 
+  useEffect(() => {
+    if (!config) {
+      setStatus("MAINTENANCE");
+      return;
+    }
+
+    const evaluateStatus = () => {
+      const now = Date.now();
+      const roundEnd = Number(config.roundEndTime) || 0;
+      const rewardEnd = Number(config.rewardEndTime) || 0;
+
+      if (roundEnd > now) {
+        setStatus("ACTIVE");
+      } else if (rewardEnd > now) {
+        setStatus("RESULTS");
+      } else {
+        setStatus("MAINTENANCE");
+      }
+    };
+
+    evaluateStatus();
+    const interval = setInterval(evaluateStatus, 1000);
+    return () => clearInterval(interval);
+  }, [config]);
+
   const currentUid = getAuth().currentUser?.uid;
   let allLeaders = [...leaders];
 
@@ -321,14 +336,9 @@ export function Leaderboard() {
   allLeaders.sort((a, b) => b.score - a.score);
   allLeaders.forEach((leader, idx) => { leader.rank = idx + 1; });
 
-  const now = Date.now();
-  
-  const roundEndTime = config?.roundEndTime || 0;
-  const rewardEndTime = config?.rewardEndTime || 0;
-  const nextRoundStartTime = config?.nextRoundStartTime || 0;
-
-  // FIX 3: Loading state is strictly controlled by the 'loading' boolean now, preventing freezes.
-  const status = now < roundEndTime ? "ACTIVE" : now < rewardEndTime ? "RESULTS" : "MAINTENANCE";
+  const roundEndTime = Number(config?.roundEndTime) || 0;
+  const rewardEndTime = Number(config?.rewardEndTime) || 0;
+  const nextRoundStartTime = Number(config?.nextRoundStartTime) || 0;
 
   const { formatted: activeCountdown } = useCountdown(roundEndTime);
   const { formatted: rewardCountdown } = useCountdown(rewardEndTime);
@@ -363,7 +373,7 @@ export function Leaderboard() {
             <Zap className="w-3 h-3 md:w-4 md:h-4 fill-current animate-pulse" /> 
             {status === "ACTIVE" ? "ROUND ENDS IN:" : status === "RESULTS" ? "REWARD EXPIRES IN:" : "NEXT ROUND STARTS IN:"} 
             <span className="font-mono text-white ml-2 text-sm md:text-base">
-              {status === "ACTIVE" ? activeCountdown : status === "RESULTS" ? rewardCountdown : nextRoundCountdown}
+              {config ? (status === "ACTIVE" ? activeCountdown : status === "RESULTS" ? rewardCountdown : nextRoundCountdown) : "--:--:--"}
             </span>
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 px-4 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-[10px] whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all pointer-events-none shadow-2xl z-50">
               <div className="flex items-center gap-2">
@@ -447,11 +457,11 @@ export function Leaderboard() {
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-0.5">System Status</span>
               <span className="text-xs md:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
                 {status === "ACTIVE" ? (
-                  <>RESET IN: <span className="text-blue-400 font-mono tracking-widest">{activeCountdown}</span></>
+                  <>RESET IN: <span className="text-blue-400 font-mono tracking-widest">{config ? activeCountdown : "--:--:--"}</span></>
                 ) : status === "RESULTS" ? (
-                  <>REWARDS EXPIRE IN: <span className="text-rose-400 font-mono tracking-widest">{rewardCountdown}</span></>
+                  <>REWARDS EXPIRE IN: <span className="text-rose-400 font-mono tracking-widest">{config ? rewardCountdown : "--:--:--"}</span></>
                 ) : (
-                  <>NEXT ROUND IN: <span className="text-emerald-400 font-mono tracking-widest">{nextRoundCountdown}</span></>
+                  <>NEXT ROUND IN: <span className="text-emerald-400 font-mono tracking-widest">{config ? nextRoundCountdown : "--:--:--"}</span></>
                 )}
               </span>
             </div>
@@ -486,15 +496,15 @@ export function Leaderboard() {
               </div>
             </div>
             <h3 className="text-3xl md:text-5xl font-black text-white uppercase tracking-tighter italic text-center mb-6">
-              System Re-Calibration In Progress
+              Round is Finished
             </h3>
             <p className="text-slate-500 max-w-lg text-center mb-12 font-medium">
-              The previous round has concluded. Data nodes are being purged and new targets are being identified for the next deployment.
+              The previous round has concluded. The next round will be starting soon. Get ready to dominate the next deployment.
             </p>
             <div className="flex flex-col items-center gap-2">
               <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.3em]">Estimated Deployment</span>
               <span className="text-5xl md:text-7xl font-mono font-black text-white tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-white">
-                {nextRoundCountdown}
+                {config ? nextRoundCountdown : "--:--:--"}
               </span>
             </div>
           </div>
